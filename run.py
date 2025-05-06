@@ -6,6 +6,7 @@ This script starts the vidTranscriber API service.
 
 import os
 import sys
+import signal
 import uvicorn
 from dotenv import load_dotenv
 
@@ -19,13 +20,32 @@ RELOAD = os.getenv("RELOAD", "false").lower() == "true"
 WORKERS = int(os.getenv("WORKERS", 1))
 LOG_LEVEL = os.getenv("LOG_LEVEL", "info")
 
+# Setup proper signal handling for cleaner shutdown
+if not RELOAD:  # Custom signal handling breaks reload mode
+    # Define a cleaner shutdown handler
+    original_sigint_handler = signal.getsignal(signal.SIGINT)
+    original_sigterm_handler = signal.getsignal(signal.SIGTERM)
+    
+    def signal_handler(sig, frame):
+        print("\n🛑 Shutdown signal received. Gracefully shutting down...")
+        # Call original handlers if they're callable
+        if callable(original_sigint_handler) and sig == signal.SIGINT:
+            original_sigint_handler(sig, frame)
+        if callable(original_sigterm_handler) and sig == signal.SIGTERM:
+            original_sigterm_handler(sig, frame)
+        sys.exit(0)
+    
+    # Set up signal handling before starting server
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+
 # Get CUDA device info
 try:
     import torch
     if torch.cuda.is_available():
         device_count = torch.cuda.device_count()
         device_name = torch.cuda.get_device_name(0) if device_count > 0 else "None"
-        print(f"GPU Device: {0}")
+        print(f"GPU Device: {0} ({device_name})")
     else:
         print("CUDA not available, using CPU")
 except ImportError:

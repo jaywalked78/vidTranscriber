@@ -48,6 +48,8 @@ The system leverages [faster-whisper](https://github.com/guillaumekln/faster-whi
 - CUDA Toolkit and cuDNN libraries (for GPU support)
 - FFmpeg (for audio extraction)
 
+See `system_requirements.txt` for detailed instructions on installing system-level dependencies.
+
 ### Setup
 
 1. Clone the repository:
@@ -56,7 +58,14 @@ The system leverages [faster-whisper](https://github.com/guillaumekln/faster-whi
    cd vidTranscriber
    ```
 
-2. Create a virtual environment:
+2. Install system-level dependencies (if not already installed):
+   ```bash
+   # Check system_requirements.txt for your OS-specific commands
+   # For Ubuntu/Debian:
+   sudo apt install ffmpeg nvidia-cuda-toolkit libcudnn9 libcudnn9-dev
+   ```
+
+3. Create a virtual environment:
    ```bash
    python -m venv venv
    source venv/bin/activate  # On Linux/Mac
@@ -64,15 +73,9 @@ The system leverages [faster-whisper](https://github.com/guillaumekln/faster-whi
    # venv\Scripts\activate  # On Windows
    ```
 
-3. Install the dependencies:
+4. Install Python dependencies:
    ```bash
    pip install -r requirements.txt
-   ```
-
-4. If using GPU acceleration, ensure CUDA libraries are installed:
-   ```bash
-   # For Ubuntu/Debian:
-   sudo apt install nvidia-cuda-toolkit libcudnn9 libcudnn9-dev
    ```
 
 5. Configure environment variables (create a `.env` file based on `.env.example`):
@@ -186,6 +189,17 @@ If you encounter CUDA-related errors:
    ```bash
    python check_gpu_setup.py
    ```
+
+### Server Shutdown Warnings
+
+When shutting down the server with Ctrl+C, you might see warnings like:
+```
+OSError: [Errno 9] Bad file descriptor
+```
+
+These warnings are a result of how Uvicorn and asyncio handle signals during shutdown and are generally not a concern. The server is still shutting down properly. These messages occur because multiple signal handlers are triggered simultaneously, leading to some file descriptors being already closed when others try to use them.
+
+If these warnings bother you, you can start the server with the included run.py script which implements cleaner signal handling:
 
 ## Changelog
 
