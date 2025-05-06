@@ -1,0 +1,12 @@
+faster-whisper>=1.0.0
+fastapi>=0.104.0
+uvicorn>=0.23.2
+python-multipart>=0.0.6
+pydantic>=2.4.2
+aiohttp>=3.8.5
+validators>=0.20.0
+torch>=2.0.0
+ffmpeg-python>=0.2.0
+uuid>=0.0.1
+python-dotenv>=1.0.0
+async-timeout>=4.0.2 
