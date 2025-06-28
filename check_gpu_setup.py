@@ -1,249 +1,181 @@
 #!/usr/bin/env python3
 """
-A utility script to check GPU setup and CUDA compatibility for vidTranscriber.
+Script to check CUDA and cuDNN versions and GPU compatibility for faster-whisper
 """
 
 import os
 import sys
-import ctypes
+import logging
 import subprocess
 from pathlib import Path
+import importlib.util
 
-def print_header(title):
-    """Print a formatted header"""
-    print("\n" + "=" * 60)
-    print(" " * 5 + title)
-    print("=" * 60 + "\n")
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
-def check_python_version():
-    """Check if Python version is supported"""
-    print_header("PYTHON VERSION")
-    v = sys.version_info
-    version_str = f"{v.major}.{v.minor}.{v.micro}"
-    print(f"Python version: {version_str}")
-    
-    if v.major != 3 or v.minor < 10:
-        print("❌ Python 3.10+ is required. Please upgrade your Python version.")
-    else:
-        print("✅ Python version OK")
-
-def check_required_libraries():
-    """Check if required libraries are installed"""
-    print_header("REQUIRED LIBRARIES")
-    libraries = [
-        "torch", 
-        "faster_whisper", 
-        "fastapi", 
-        "pydantic", 
-        "uvicorn", 
-        "python-dotenv",
-        "ffmpeg-python"
-    ]
-    
-    missing = []
-    for lib in libraries:
-        try:
-            module = __import__(lib)
-            print(f"✅ {lib} is installed: {getattr(module, '__version__', 'Unknown version')}")
-        except ImportError:
-            print(f"❌ {lib} is not installed")
-            missing.append(lib)
-    
-    if missing:
-        print("\nInstall missing libraries with:")
-        print(f"pip install {' '.join(missing)}")
-
-def check_cuda_libraries():
-    """Check if CUDA libraries are available"""
-    print_header("CUDA LIBRARIES")
-    
-    # Check CUDA runtime
-    cuda_available = False
-    try:
-        ctypes.CDLL("libcudart.so")
-        print("✅ CUDA runtime (libcudart.so) found")
-        cuda_available = True
-    except OSError:
-        print("❌ CUDA runtime (libcudart.so) not found")
-    
-    # Check cuDNN
-    cudnn_available = False
-    if cuda_available:
-        try:
-            ctypes.CDLL("libcudnn.so")
-            print("✅ cuDNN (libcudnn.so) found")
-            cudnn_available = True
-        except OSError:
-            print("❌ cuDNN (libcudnn.so) not found")
-    
-    # Check specific cuDNN ops libraries (needed for faster-whisper)
-    if cudnn_available:
-        cudnn_ops_files = [
-            "libcudnn_ops.so", 
-            "libcudnn_ops.so.9", 
-            "libcudnn_ops.so.9.1", 
-            "libcudnn_ops.so.9.1.0"
-        ]
-        
-        for lib in cudnn_ops_files:
-            try:
-                ctypes.CDLL(lib)
-                print(f"✅ {lib} found")
-                break
-            except OSError:
-                if lib == cudnn_ops_files[-1]:
-                    print(f"❌ None of these cuDNN ops libraries found: {', '.join(cudnn_ops_files)}")
-                    print("   This might cause 'Cannot load symbol cudnnCreateTensorDescriptor' errors")
-                    print("   Consider installing libcudnn9 and libcudnn9-dev packages")
+def check_package(package_name):
+    """Check if a Python package is installed"""
+    return importlib.util.find_spec(package_name) is not None
 
 def check_torch_cuda():
-    """Check if PyTorch CUDA is working properly"""
-    print_header("PYTORCH CUDA SUPPORT")
-    
+    """Check if PyTorch with CUDA is installed and working"""
     try:
         import torch
+        logger.info(f"PyTorch version: {torch.__version__}")
         
-        cuda_available = torch.cuda.is_available()
-        print(f"PyTorch version: {torch.__version__}")
-        print(f"CUDA available: {cuda_available}")
-        
-        if cuda_available:
-            device_count = torch.cuda.device_count()
-            print(f"CUDA device count: {device_count}")
+        if torch.cuda.is_available():
+            logger.info(f"CUDA is available: {torch.version.cuda}")
+            logger.info(f"Number of GPUs: {torch.cuda.device_count()}")
             
-            for i in range(device_count):
-                device_name = torch.cuda.get_device_name(i)
-                print(f"CUDA device {i}: {device_name}")
-            
-            # Try a simple CUDA operation
+            for i in range(torch.cuda.device_count()):
+                gpu_name = torch.cuda.get_device_name(i)
+                free_mem, total_mem = torch.cuda.mem_get_info(i)
+                free_mem_gb = free_mem / (1024**3)
+                total_mem_gb = total_mem / (1024**3)
+                
+                logger.info(f"GPU {i}: {gpu_name}")
+                logger.info(f"  Memory: {free_mem_gb:.2f}GB free / {total_mem_gb:.2f}GB total")
+                
+            # Check compute capabilities
             try:
-                x = torch.rand(5, 5).cuda()
-                y = torch.rand(5, 5).cuda()
-                z = x + y
-                z.cpu()  # Move back to CPU
-                print("✅ PyTorch CUDA operations test: PASSED")
-            except Exception as e:
-                print(f"❌ PyTorch CUDA operations test FAILED: {str(e)}")
-        else:
-            print("❌ PyTorch doesn't detect CUDA. Check your installation.")
-    
-    except ImportError:
-        print("❌ PyTorch is not installed")
-
-def check_ffmpeg():
-    """Check if FFmpeg is installed and working"""
-    print_header("FFMPEG")
-    
-    try:
-        result = subprocess.run(["ffmpeg", "-version"], 
-                                stdout=subprocess.PIPE, 
-                                stderr=subprocess.PIPE, 
-                                text=True)
-        
-        if result.returncode == 0:
-            ffmpeg_version = result.stdout.split('\n')[0]
-            print(f"✅ FFmpeg is installed: {ffmpeg_version}")
-        else:
-            print("❌ FFmpeg is installed but returned an error")
-            print(result.stderr)
+                compute_capability = torch.cuda.get_device_capability(0)
+                logger.info(f"GPU Compute Capability: {compute_capability[0]}.{compute_capability[1]}")
+            except:
+                logger.warning("Couldn't determine compute capability")
             
-    except FileNotFoundError:
-        print("❌ FFmpeg is not installed or not in PATH")
-        print("   Install FFmpeg using your package manager")
-        print("   For example: sudo apt install ffmpeg")
+            return True
+        else:
+            logger.warning("CUDA is not available in PyTorch")
+            return False
+    except ImportError:
+        logger.error("PyTorch is not installed")
+        return False
+    except Exception as e:
+        logger.error(f"Error checking PyTorch CUDA: {str(e)}")
+        return False
 
 def check_faster_whisper():
-    """Check if faster-whisper is working properly"""
-    print_header("FASTER-WHISPER")
-    
+    """Check if faster-whisper is installed and working"""
     try:
         from faster_whisper import WhisperModel
-        print("✅ faster-whisper is installed")
+        logger.info("faster-whisper is installed")
         
-        # Check if a test model can be loaded
-        try:
-            print("Attempting to load a tiny model to test faster-whisper...")
-            model = WhisperModel("tiny", device="cpu", compute_type="float32")
-            print("✅ Successfully loaded a test model")
-        except Exception as e:
-            print(f"❌ Failed to load test model: {str(e)}")
-            
-    except ImportError:
-        print("❌ faster-whisper is not installed")
+        # Try importing other components
+        from faster_whisper import __version__
+        logger.info(f"faster-whisper version: {__version__}")
+        
+        return True
+    except ImportError as e:
+        logger.error(f"faster-whisper import error: {str(e)}")
+        return False
+    except Exception as e:
+        logger.error(f"Error with faster-whisper: {str(e)}")
+        return False
 
-def check_environment_variables():
-    """Check environment variables and configuration"""
-    print_header("ENVIRONMENT VARIABLES")
-    
-    env_file = Path('.env')
-    if env_file.exists():
-        print(f"✅ Found .env file at {env_file.absolute()}")
-    else:
-        print("❌ .env file not found. Consider creating one from .env.example")
-    
-    important_vars = [
-        "MODEL_NAME", "DEVICE", "FORCE_CPU", "COMPUTE_TYPE", "BATCH_SIZE",
-        "TEMP_DIR", "OUTPUT_DIR", "PORT"
-    ]
-    
-    for var in important_vars:
-        value = os.environ.get(var)
-        if value:
-            print(f"✅ {var} is set to '{value}'")
-        else:
-            print(f"ℹ️ {var} is not set, will use default value")
-
-def print_summary():
-    """Print a summary of recommendations based on the checks"""
-    print_header("SUMMARY & RECOMMENDATIONS")
-    
+def check_cudnn():
+    """Attempt to check cuDNN version"""
     try:
-        import torch
-        cuda_available = torch.cuda.is_available()
+        # First try using ctypes to access the library
+        import ctypes
+        from ctypes.util import find_library
         
-        if cuda_available:
-            print("GPU MODE RECOMMENDATIONS:")
-            print("✅ Use the following in your .env file:")
-            print("   DEVICE=cuda")
-            print("   FORCE_CPU=false")
-            print("   COMPUTE_TYPE=float16")
-            
-            # If CUDA is available but ops libraries weren't found earlier
+        cudnn_path = find_library('cudnn')
+        if cudnn_path:
             try:
-                ctypes.CDLL("libcudnn_ops.so")
-            except OSError:
-                print("")
-                print("⚠️ CUDA is available but cuDNN ops libraries weren't found.")
-                print("   You might encounter the 'Cannot load symbol cudnnCreateTensorDescriptor' error.")
-                print("   Solutions:")
-                print("   1. Install cuDNN packages: sudo apt install libcudnn9 libcudnn9-dev")
-                print("   2. Or use CPU mode by setting: FORCE_CPU=true")
+                cudnn = ctypes.CDLL(cudnn_path)
+                # This would only work if the library exports version symbols
+                logger.info(f"Found cuDNN at: {cudnn_path}")
+                return True
+            except:
+                pass
+        
+        # Try alternative method using subprocess (Linux only)
+        try:
+            ldconfig = subprocess.check_output('ldconfig -p | grep cudnn', shell=True).decode('utf-8')
+            if ldconfig:
+                logger.info(f"cuDNN found via ldconfig: {ldconfig.strip()}")
+                return True
+        except:
+            pass
+            
+        # If both methods fail, check if the cuDNN package is installed via pip
+        if check_package('nvidia.cudnn'):
+            logger.info("cuDNN is installed via pip package nvidia.cudnn")
+            try:
+                import nvidia.cudnn
+                logger.info(f"nvidia.cudnn package found: {nvidia.cudnn}")
+                return True
+            except:
+                pass
                 
+        logger.warning("Could not determine cuDNN version")
+        return False
+    except Exception as e:
+        logger.error(f"Error checking cuDNN: {str(e)}")
+        return False
+
+def check_ffmpeg():
+    """Check if FFmpeg is available"""
+    try:
+        result = subprocess.run(['ffmpeg', '-version'], 
+                               stdout=subprocess.PIPE, 
+                               stderr=subprocess.PIPE, 
+                               text=True)
+        if result.returncode == 0:
+            version_line = result.stdout.split('\n')[0]
+            logger.info(f"FFmpeg version: {version_line}")
+            return True
         else:
-            print("CPU MODE RECOMMENDATIONS:")
-            print("✅ Use the following in your .env file:")
-            print("   DEVICE=cpu")
-            print("   FORCE_CPU=true")
-            print("   COMPUTE_TYPE=float32")
-    except ImportError:
-        print("⚠️ PyTorch not installed. Install it to determine the best settings.")
+            logger.warning("FFmpeg not found in PATH")
+            return False
+    except Exception as e:
+        logger.error(f"Error checking FFmpeg: {str(e)}")
+        return False
 
 def main():
-    """Run all checks"""
-    print("\nvidTranscriber GPU/CUDA Setup Check Tool")
-    print("This tool checks your environment for vidTranscriber compatibility")
-    print("---------------------------------------------------------------\n")
+    """Main function to check all dependencies"""
+    logger.info("Checking system compatibility for faster-whisper...")
+    logger.info("=" * 60)
     
-    check_python_version()
-    check_required_libraries()
-    check_cuda_libraries()
-    check_torch_cuda()
-    check_ffmpeg()
-    check_faster_whisper()
-    check_environment_variables()
-    print_summary()
+    # Check PyTorch and CUDA
+    gpu_ok = check_torch_cuda()
     
-    print("\nCheck complete! See above for any issues or recommendations.")
+    # Check cuDNN
+    cudnn_ok = check_cudnn()
+    
+    # Check faster-whisper
+    faster_whisper_ok = check_faster_whisper()
+    
+    # Check FFmpeg
+    ffmpeg_ok = check_ffmpeg()
+    
+    # Summary
+    logger.info("=" * 60)
+    logger.info("Summary:")
+    logger.info(f"PyTorch with CUDA: {'✅' if gpu_ok else '❌'}")
+    logger.info(f"cuDNN libraries: {'✅' if cudnn_ok else '⚠️ (might still work)'}")
+    logger.info(f"faster-whisper: {'✅' if faster_whisper_ok else '❌'}")
+    logger.info(f"FFmpeg: {'✅' if ffmpeg_ok else '❌'}")
+    
+    if gpu_ok and faster_whisper_ok and ffmpeg_ok:
+        logger.info("✅ System appears to be properly configured for GPU acceleration!")
+        if not cudnn_ok:
+            logger.info("⚠️ cuDNN status could not be verified, but the system might still work.")
+    else:
+        logger.warning("⚠️ Some components are missing or not properly configured.")
+        if not gpu_ok:
+            logger.info("   - Please ensure NVIDIA GPU drivers and CUDA 12+ are installed")
+        if not faster_whisper_ok:
+            logger.info("   - Please install faster-whisper: pip install faster-whisper")
+        if not ffmpeg_ok:
+            logger.info("   - Please install ffmpeg")
+    
+    logger.info("=" * 60)
+    logger.info("For detailed setup instructions, see: https://github.com/SYSTRAN/faster-whisper")
 
 if __name__ == "__main__":
     main() 
